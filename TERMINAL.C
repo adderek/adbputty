@@ -1889,13 +1889,18 @@ static void check_selection(Terminal *term, pos from, pos to)
 static void scroll(Terminal *term, int topline, int botline, int lines, int sb)
 {
     termline *line;
-    int i, seltop, olddisptop, shift;
+    int i, seltop;
+#ifdef OPTIMISE_SCROLL
+    int olddisptop, shift;
+#endif /* OPTIMISE_SCROLL */
 
     if (topline != 0 || term->alt_which != 0)
 	sb = FALSE;
 
+#ifdef OPTIMISE_SCROLL
     olddisptop = term->disptop;
     shift = lines;
+#endif /* OPTIMISE_SCROLL */
     if (lines < 0) {
 	while (lines < 0) {
 	    line = delpos234(term->screen, botline);
@@ -3290,8 +3295,8 @@ static void term_out(Terminal *term)
 		    }
 		    term->termstate = SEEN_CSI;
 		} else if (c == ';') {
-		    if (++term->esc_nargs <= ARGS_MAX)
-			term->esc_args[term->esc_nargs - 1] = ARG_DEFAULT;
+		    if (term->esc_nargs < ARGS_MAX)
+			term->esc_args[term->esc_nargs++] = ARG_DEFAULT;
 		    term->termstate = SEEN_CSI;
 		} else if (c < '@') {
 		    if (term->esc_query)
@@ -4770,7 +4775,6 @@ static void do_paint(Terminal *term, Context ctx, int may_optimise)
 	termchar *lchars;
 	int dirty_line, dirty_run, selected;
 	unsigned long attr = 0, cset = 0;
-	int updated_line = 0;
 	int start = 0;
 	int ccount = 0;
 	int last_run_dirty = 0;
@@ -4936,7 +4940,9 @@ static void do_paint(Terminal *term, Context ctx, int may_optimise)
 	    break_run = ((tattr ^ attr) & term->attr_mask) != 0;
 
 	    /* Special hack for VT100 Linedraw glyphs */
-	    if (tchar >= 0x23BA && tchar <= 0x23BD)
+	    if ((tchar >= 0x23BA && tchar <= 0x23BD) ||
+                (j > 0 && (newline[j-1].chr >= 0x23BA &&
+                           newline[j-1].chr <= 0x23BD)))
 		break_run = TRUE;
 
 	    /*
@@ -4968,8 +4974,6 @@ static void do_paint(Terminal *term, Context ctx, int may_optimise)
 		    if (attr & (TATTR_ACTCURS | TATTR_PASCURS))
 			do_cursor(ctx, start, i, ch, ccount, attr,
 				  ldata->lattr);
-
-		    updated_line = 1;
 		}
 		start = j;
 		ccount = 0;
@@ -5054,8 +5058,6 @@ static void do_paint(Terminal *term, Context ctx, int may_optimise)
 	    if (attr & (TATTR_ACTCURS | TATTR_PASCURS))
 		do_cursor(ctx, start, i, ch, ccount, attr,
 			  ldata->lattr);
-
-	    updated_line = 1;
 	}
 
 	unlineptr(ldata);
@@ -5251,7 +5253,7 @@ static void clipme(Terminal *term, pos top, pos bottom, int rect, int desel)
 	    sprintf(cbuf, "<U+%04x>", (ldata[top.x] & 0xFFFF));
 #else
 	    wchar_t cbuf[16], *p;
-	    int set, c;
+	    int c;
 	    int x = top.x;
 
 	    if (ldata->chars[x].chr == UCSWIDE) {
@@ -5285,7 +5287,6 @@ static void clipme(Terminal *term, pos top, pos bottom, int rect, int desel)
 		    break;
 		}
 
-		set = (uc & CSET_MASK);
 		c = (uc & ~CSET_MASK);
 #ifdef PLATFORM_IS_UTF16
 		if (uc > 0x10000 && uc < 0x110000) {

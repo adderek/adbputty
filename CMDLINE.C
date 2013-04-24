@@ -172,6 +172,7 @@ int cmdline_process_param(char *p, char *value, int need_save, Config *cfg)
 	 * saved. */
 	do_defaults(value, cfg);
 	loaded_session = TRUE;
+	cmdline_session_name = dupstr(value);
 	return 2;
     }
     if (!strcmp(p, "-ssh")) {
@@ -209,7 +210,7 @@ int cmdline_process_param(char *p, char *value, int need_save, Config *cfg)
 	UNAVAILABLE_IN(TOOLTYPE_FILETRANSFER | TOOLTYPE_NONNETWORK);
 	SAVEABLE(0);
 	default_protocol = cfg->protocol = PROT_ADB;
-    }    
+    }
     if (!strcmp(p, "-serial")) {
 	RETURN(1);
 	/* Serial is not NONNETWORK in an odd sense of the word */

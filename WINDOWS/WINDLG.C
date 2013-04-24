@@ -19,6 +19,13 @@
 #include <commdlg.h>
 #include <shellapi.h>
 
+#define TREEVIEWWIDTH 95 // 95 as original, in dialog units
+#define GAPBETWEEN 3
+#define GAPWITHIN 1
+#define GAPXBOX 7
+#define GAPYBOX 4
+#define PUSHBTNHEIGHT 14
+
 #ifdef MSVC4
 #define TVINSERTSTRUCT  TV_INSERTSTRUCT
 #define TVITEM          TV_ITEM
@@ -46,7 +53,7 @@ static int nevents = 0, negsize = 0;
 
 extern Config cfg;		       /* defined in window.c */
 
-#define PRINTER_DISABLED_STRING "None (printing disabled)"
+#define PRINTER_DISABLED_STRING "\\None (printing disabled)" // Characters \ and , are forbidden in the printer name so I'm using one of them
 
 void force_normal(HWND hwnd)
 {
@@ -342,8 +349,20 @@ static void create_controls(HWND hwnd, char *path)
     if (!path[0]) {
 	/*
 	 * Here we must create the basic standard controls.
+	 * Bottom button boxes ("About", etc.)
 	 */
-	ctlposinit(&cp, hwnd, 3, 3, 235);
+	RECT r;
+	LONG DialogBaseUnitVertMul1k;
+	r.left = 0;
+	r.right = 0;
+	r.top = 0;
+	// Using large value to handle non-integer dialog base units... (that would be strange however on windows)
+	// should be multiplication of 8 because MSDN says that dialog units are mapped to pixels vertically using MulDiv with 8
+	r.bottom = 0x8000;
+    MapDialogRect(hwnd, &r);
+	DialogBaseUnitVertMul1k = r.bottom;
+	GetClientRect(hwnd, &r);
+	ctlposinit(&cp, hwnd, 3, 3, MulDiv(r.bottom,0x8000,DialogBaseUnitVertMul1k) - PUSHBTNHEIGHT - GAPBETWEEN);
 	wc = &ctrls_base;
 	base_id = IDCX_STDBASE;
     } else {
@@ -351,7 +370,7 @@ static void create_controls(HWND hwnd, char *path)
 	 * Otherwise, we're creating the controls for a particular
 	 * panel.
 	 */
-	ctlposinit(&cp, hwnd, 100, 3, 13);
+	ctlposinit(&cp, hwnd, 100, 3, 3);
 	wc = &ctrls_panel;
 	base_id = IDCX_PANELBASE;
     }
@@ -409,29 +428,20 @@ static int CALLBACK GenericMainDlgProc(HWND hwnd, UINT msg,
 	 * Create the tree view.
 	 */
 	{
-	    RECT r;
+		// TODO: adjust controls height based on client area height (this is hard-coded across the app, especially config.c)
+	    RECT r, rc_px, rw_px;
 	    WPARAM font;
-	    HWND tvstatic;
-
-	    r.left = 3;
-	    r.right = r.left + 95;
-	    r.top = 3;
-	    r.bottom = r.top + 10;
+		GetWindowRect(hwnd, &rw_px);
+		GetClientRect(hwnd, &rc_px);
+		// Conversion to pixels using MapDialogRect works fine
+		// Conversion from pixels is buggy and GetDialogBaseUnits shouldn't be used
+		r.left = GAPBETWEEN;
+		r.right = TREEVIEWWIDTH;
+		r.top = GAPBETWEEN;
+		r.bottom = PUSHBTNHEIGHT + GAPBETWEEN; // area to leave for buttons
 	    MapDialogRect(hwnd, &r);
-	    tvstatic = CreateWindowEx(0, "STATIC", "Cate&gory:",
-				      WS_CHILD | WS_VISIBLE,
-				      r.left, r.top,
-				      r.right - r.left, r.bottom - r.top,
-				      hwnd, (HMENU) IDCX_TVSTATIC, hinst,
-				      NULL);
-	    font = SendMessage(hwnd, WM_GETFONT, 0, 0);
-	    SendMessage(tvstatic, WM_SETFONT, font, MAKELPARAM(TRUE, 0));
-
-	    r.left = 3;
-	    r.right = r.left + 95;
-	    r.top = 13;
-	    r.bottom = r.top + 219;
-	    MapDialogRect(hwnd, &r);
+		r.bottom = rc_px.bottom - r.bottom;
+		r.right += rc_px.left;
 	    treeview = CreateWindowEx(WS_EX_CLIENTEDGE, WC_TREEVIEW, "",
 				      WS_CHILD | WS_VISIBLE |
 				      WS_TABSTOP | TVS_HASLINES |
@@ -649,6 +659,7 @@ int do_config(void)
     dp.wintitle = dupprintf("%s Configuration", appname);
     dp.errtitle = dupprintf("%s Error", appname);
     dp.data = &cfg;
+    dlg_auto_set_fixed_pitch_flag(&dp);
     dp.shortcuts['g'] = TRUE;	       /* the treeview: `Cate&gory' */
 
     ret =
@@ -682,6 +693,7 @@ int do_reconfig(HWND hwnd, int protcfginfo)
     dp.wintitle = dupprintf("%s Reconfiguration", appname);
     dp.errtitle = dupprintf("%s Error", appname);
     dp.data = &cfg;
+    dlg_auto_set_fixed_pitch_flag(&dp);
     dp.shortcuts['g'] = TRUE;	       /* the treeview: `Cate&gory' */
 
     ret = SaneDialogBox(hinst, MAKEINTRESOURCE(IDD_MAINBOX), NULL,

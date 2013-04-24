@@ -26,7 +26,6 @@
 #define GAPWITHIN 1
 #define GAPXBOX 7
 #define GAPYBOX 4
-#define DLGWIDTH 168
 #define STATICHEIGHT 8
 #define TITLEHEIGHT 12
 #define CHECKBOXHEIGHT 8
@@ -1178,7 +1177,7 @@ static char *shortcut_escape(const char *text, char shortcut)
     while (*p) {
 	if (shortcut != NO_SHORTCUT &&
 	    tolower((unsigned char)*p) == shortcut) {
-	    *q++ = '&';
+	    *q++ = '=&';
 	    shortcut = NO_SHORTCUT;    /* stop it happening twice */
 	} else if (*p == '&') {
 	    *q++ = '&';
@@ -1955,8 +1954,8 @@ int winctrl_handle_command(struct dlgparam *dp, UINT msg,
 	    cf.lStructSize = sizeof(cf);
 	    cf.hwndOwner = dp->hwnd;
 	    cf.lpLogFont = &lf;
-	    cf.Flags = CF_FIXEDPITCHONLY | CF_FORCEFONTEXIST |
-		CF_INITTOLOGFONTSTRUCT | CF_SCREENFONTS;
+	    cf.Flags = (dp->fixed_pitch_fonts ? CF_FIXEDPITCHONLY : 0) |
+                CF_FORCEFONTEXIST | CF_INITTOLOGFONTSTRUCT | CF_SCREENFONTS;
 
 	    if (ChooseFont(&cf)) {
 		strncpy(fs.name, lf.lfFaceName,
@@ -2321,6 +2320,8 @@ void dlg_fontsel_set(union control *ctrl, void *dlg, FontSpec fs)
 			(fs.height < 0 ? "pixel" : "point"));
     SetDlgItemText(dp->hwnd, c->base_id+1, buf);
     sfree(buf);
+
+    dlg_auto_set_fixed_pitch_flag(dp);
 }
 
 void dlg_fontsel_get(union control *ctrl, void *dlg, FontSpec *fs)
@@ -2466,6 +2467,57 @@ int dlg_coloursel_results(union control *ctrl, void *dlg,
 	return 0;
 }
 
+void dlg_auto_set_fixed_pitch_flag(void *dlg)
+{
+    struct dlgparam *dp = (struct dlgparam *)dlg;
+    Config *cfg = (Config *)dp->data;
+    HFONT font;
+    HDC hdc;
+    TEXTMETRIC tm;
+    int is_var;
+
+    /*
+     * Attempt to load the current font, and see if it's
+     * variable-pitch. If so, start off the fixed-pitch flag for the
+     * dialog box as false.
+     *
+     * We assume here that any client of the dlg_* mechanism which is
+     * using font selectors at all is also using a normal 'Config *'
+     * as dp->data.
+     */
+
+    font = CreateFont(0, 0, 0, 0, FW_DONTCARE, FALSE, FALSE, FALSE,
+                      DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
+                      CLIP_DEFAULT_PRECIS, FONT_QUALITY(cfg->font_quality),
+                      FIXED_PITCH | FF_DONTCARE, cfg->font.name);
+    hdc = GetDC(NULL);
+    if (font && hdc && SelectObject(hdc, font) && GetTextMetrics(hdc, &tm)) {
+        /* Note that the TMPF_FIXED_PITCH bit is defined upside down :-( */
+        is_var = (tm.tmPitchAndFamily & TMPF_FIXED_PITCH);
+    } else {
+        is_var = FALSE;                /* assume it's basically normal */
+    }
+    if (hdc)
+        ReleaseDC(NULL, hdc);
+    if (font)
+        DeleteObject(font);
+
+    if (is_var)
+        dp->fixed_pitch_fonts = FALSE;
+}
+
+int dlg_get_fixed_pitch_flag(void *dlg)
+{
+    struct dlgparam *dp = (struct dlgparam *)dlg;
+    return dp->fixed_pitch_fonts;
+}
+
+void dlg_set_fixed_pitch_flag(void *dlg, int flag)
+{
+    struct dlgparam *dp = (struct dlgparam *)dlg;
+    dp->fixed_pitch_fonts = flag;
+}
+
 struct perctrl_privdata {
     union control *ctrl;
     void *data;
@@ -2493,6 +2545,7 @@ void dp_init(struct dlgparam *dp)
     dp->hwnd = NULL;
     dp->wintitle = dp->errtitle = NULL;
     dp->privdata = newtree234(perctrl_privdata_cmp);
+    dp->fixed_pitch_fonts = TRUE;
 }
 
 void dp_add_tree(struct dlgparam *dp, struct winctrls *wc)

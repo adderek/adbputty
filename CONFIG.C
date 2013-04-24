@@ -10,7 +10,7 @@
 #include "dialog.h"
 #include "storage.h"
 
-#define PRINTER_DISABLED_STRING "None (printing disabled)"
+#define PRINTER_DISABLED_STRING "\\None (printing disabled)" // Use "\" or "," as those characters are forbidden (at least in windows)
 
 #define HOST_BOX_TITLE "Host Name (or IP address)"
 #define PORT_BOX_TITLE "Port"
@@ -52,7 +52,7 @@ static void config_port_handler(union control *ctrl, void *dlg,
     char buf[80];
 
     /*
-     * This function works just like the standard edit box handler,
+     * This function works similarly to the standard edit box handler,
      * only it has to choose the control's label and text from two
      * different places depending on the protocol.
      */
@@ -66,7 +66,11 @@ static void config_port_handler(union control *ctrl, void *dlg,
 	    sprintf(buf, "%d", cfg->serspeed);
 	} else {
 	    dlg_label_change(ctrl, dlg, PORT_BOX_TITLE);
-	    sprintf(buf, "%d", cfg->port);
+	    if (cfg->port != 0)
+		sprintf(buf, "%d", cfg->port);
+	    else
+		/* Display an (invalid) port of 0 as blank */
+		buf[0] = '\0';
 	}
 	dlg_editbox_set(ctrl, dlg, buf);
     } else if (event == EVENT_VALCHANGE) {
@@ -118,15 +122,16 @@ void config_protocolbuttons_handler(union control *ctrl, void *dlg,
 	    Backend *nb = backend_from_proto(cfg->protocol);
 	    assert(ob);
 	    assert(nb);
-	    /* Iff the user hasn't changed the port from the protocol
-	     * default (if any), update it with the new protocol's
-	     * default.
-	     * (XXX: this isn't perfect; a default can become permanent
-	     * by going via the serial backend. However, it helps with
-	     * the common case of tabbing through the controls in order
-	     * and setting a non-default port.) */
-	    if (cfg->port == ob->default_port &&
-		cfg->port > 0 && nb->default_port > 0)
+	    /* Iff the user hasn't changed the port from the old protocol's
+	     * default, update it with the new protocol's default.
+	     * (This includes a "default" of 0, implying that there is no
+	     * sensible default for that protocol; in this case it's
+	     * displayed as a blank.)
+	     * This helps with the common case of tabbing through the
+	     * controls in order and setting a non-default port before
+	     * getting to the protocol; we want that non-default port
+	     * to be preserved. */
+	    if (cfg->port == ob->default_port)
 		cfg->port = nb->default_port;
 	}
 	dlg_refresh(hp->host, dlg);
@@ -1200,22 +1205,22 @@ void setup_config_box(struct controlbox *b, int midsession,
 	ctrl_columns(s, 1, 100);
 
 	if (!backend_from_proto(PROT_SSH)) {
-	    ctrl_radiobuttons(s, "Connection type:", NO_SHORTCUT, 4,
+	    ctrl_radiobuttons(s, "Connection type:", NO_SHORTCUT, 6,
 			      HELPCTX(session_hostname),
 			      config_protocolbuttons_handler, P(hp),
-			      "Raw", 'w', I(PROT_RAW),
-			      "Adb", 'a', I(PROT_ADB),
-			      "Telnet", 't', I(PROT_TELNET),
-			      "Rlogin", 'i', I(PROT_RLOGIN),
+			      "raw", 'w', I(PROT_RAW),
+			      "ADB", 'a', I(PROT_ADB),
+			      "telnet", 't', I(PROT_TELNET),
+			      "rlogin", 'i', I(PROT_RLOGIN),
 			      NULL);
 	} else {
-	    ctrl_radiobuttons(s, "Connection type:", NO_SHORTCUT, 5,
+	    ctrl_radiobuttons(s, "Connection type:", NO_SHORTCUT, 6,
 			      HELPCTX(session_hostname),
 			      config_protocolbuttons_handler, P(hp),
-			      "Raw", 'w', I(PROT_RAW),
-			      "Adb", 'b', I(PROT_ADB),
-			      "Telnet", 't', I(PROT_TELNET),
-			      "Rlogin", 'i', I(PROT_RLOGIN),
+			      "raw", 'w', I(PROT_RAW),
+			      "ADB", 'b', I(PROT_ADB),
+			      "telnet", 't', I(PROT_TELNET),
+			      "rlogin", 'i', I(PROT_RLOGIN),
 			      "SSH", 's', I(PROT_SSH),
 			      NULL);
 	}
@@ -1241,7 +1246,7 @@ void setup_config_box(struct controlbox *b, int midsession,
 				HELPCTX(session_saved),
 				sessionsaver_handler, P(ssd));
     ssd->listbox->generic.column = 0;
-    ssd->listbox->listbox.height = 7;
+    ssd->listbox->listbox.height = 34;
     if (!midsession) {
 	ssd->loadbutton = ctrl_pushbutton(s, "Load", 'l',
 					  HELPCTX(session_saved),
@@ -1277,7 +1282,7 @@ void setup_config_box(struct controlbox *b, int midsession,
 			  I(offsetof(Config, close_on_exit)),
 			  "Always", I(FORCE_ON),
 			  "Never", I(FORCE_OFF),
-			  "Only on clean exit", I(AUTO), NULL);
+			  "On clean exit", I(AUTO), NULL);
 
     /*
      * The Session/Logging panel.
@@ -2090,6 +2095,10 @@ void setup_config_box(struct controlbox *b, int midsession,
 			  HELPCTX(ssh_auth_bypass),
 			  dlg_stdcheckbox_handler,
 			  I(offsetof(Config,ssh_no_userauth)));
+	    ctrl_checkbox(s, "Display pre-authentication banner (SSH-2 only)",
+			  'd', HELPCTX(ssh_auth_banner),
+			  dlg_stdcheckbox_handler,
+			  I(offsetof(Config,ssh_show_banner)));
 
 	    s = ctrl_getset(b, "Connection/SSH/Auth", "methods",
 			    "Authentication methods");
